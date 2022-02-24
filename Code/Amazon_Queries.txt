@@ -1,0 +1,280 @@
+Amazon Reviews Parquet
+
+Exploratory Data Analysis in SQL (AWS Athena)
+
+SHOW COLUMNS
+FROM amazon_reviews_parquet
+
+There are 16 Columns:
+
+marketplace         
+customer_id         
+review_id           
+product_id          
+product_parent      
+product_title       
+star_rating         
+helpful_votes       
+total_votes         
+vine                
+verified_purchase   
+review_headline     
+review_body         
+review_date         
+year                
+product_category  
+
+SELECT COUNT(review_id)
+FROM amazon_reviews_parquet
+
+160,796,570 reviews
+
+SELECT COUNT(DISTINCT review_id)
+FROM amazon_reviews_parquet
+
+There are some duplicate reviwes since the number of distinct reviews is 153,865,404
+
+SELECT COUNT(DISTINCT customer_id) as customers
+FROM amazon_reviews_parquet
+
+There are 34,940,792 customers
+
+
+SELECT DISTINCT product_category
+FROM amazon_reviews_parquet
+
+#	product_category
+1	Kitchen
+2	Software
+3	Digital_Ebook_Purchase
+4	Digital_Video_Download
+5	Digital_Software
+6	Mobile_Electronics
+7	Baby
+8	Digital_Music_Purchase
+9	Pet_Products
+10	Music
+11	Jewelry
+12	Automotive
+13	Mobile_Apps
+14	PC
+15	Personal_Care_Appliances
+16	Video_Games
+17	Home_Entertainment
+18	Electronics
+19	Sports
+20	Lawn_and_Garden
+21	Furniture
+22	Video_DVD
+23	Health_&_Personal_Care
+24	Luggage
+25	Musical_Instruments
+26	Grocery
+27	Books
+28	Office_Products
+29	Outdoors
+30	Wireless
+31	Home
+32	Apparel
+33	Watches
+34	Gift_Card
+35	Digital_Video_Games
+36	Camera
+37	Toys
+38	Beauty
+39	Tools
+40	Video
+41	Shoes
+42	Home_Improvement
+43	Major_Appliances
+
+There are 43 distincts product categories
+
+SELECT DISTINCT Year
+FROM amazon_reviews_parquet
+ORDER BY Year DESC;
+
+The data is supposed to span 20 years from 1995 to 2015.
+However, I noticed that some reviews where made in 1973. I will investigate further.
+
+SELECT *
+FROM amazon_reviews_parquet
+WHERE Year = 1973
+
+Only one review was made in 1973. It is in japanese.
+I didn't know there where japanese reviews. This led me to investigate how many different countries are present.
+
+SELECT DISTINCT Marketplace
+FROM amazon_reviews_parquet
+
+There are 5 countries: DE, US, FR, UK, JP
+Those are Germany, United States, France, and Japan.
+
+#	marketplace	Total_Reviews
+1	US	157893444
+2	UK	1707494
+3	DE	679121
+4	JP	262431
+5	FR	254080
+
+As expected, there are more reviews coming from the US (158 millions).
+But, other countries have a fair number of reviews.
+
+I wonder how many duplicates reviews there are in each country 
+
+SELECT 'US', (SELECT COUNT(review_id)
+FROM amazon_reviews_parquet
+WHERE marketplace='US')
+-
+(SELECT COUNT(DISTINCT review_id) 
+FROM amazon_reviews_parquet
+WHERE marketplace='US') as Duplicates
+
+UNION 
+
+SELECT 'UK', (SELECT COUNT(review_id)
+FROM amazon_reviews_parquet
+WHERE marketplace='UK')
+-
+(SELECT COUNT(DISTINCT review_id) 
+FROM amazon_reviews_parquet
+WHERE marketplace='UK') as Duplicates
+
+UNION
+
+SELECT 'DE', (SELECT COUNT(review_id)
+FROM amazon_reviews_parquet
+WHERE marketplace='DE')
+-
+(SELECT COUNT(DISTINCT review_id) 
+FROM amazon_reviews_parquet
+WHERE marketplace='DE') as Duplicates
+
+UNION
+
+SELECT 'JP', (SELECT COUNT(review_id)
+FROM amazon_reviews_parquet
+WHERE marketplace='JP')
+-
+(SELECT COUNT(DISTINCT review_id) 
+FROM amazon_reviews_parquet
+WHERE marketplace='JP') as Duplicates
+
+UNION
+
+SELECT 'FR', (SELECT COUNT(review_id)
+FROM amazon_reviews_parquet
+WHERE marketplace='FR')
+-
+(SELECT COUNT(DISTINCT review_id) 
+FROM amazon_reviews_parquet
+WHERE marketplace='FR') as Duplicates;
+
+#	_col0	Duplicates
+1	DE	0
+2	JP	0
+3	UK	0
+4	FR	0
+5	US	6931166
+
+Surprisingly, only US has duplicates reviews
+
+How many customers by Countries?
+
+SELECT marketplace, COUNT(DISTINCT customer_id) as customers
+FROM amazon_reviews_parquet
+GROUP BY marketplace
+ORDER BY customers DESC;
+
+#	marketplace	customers
+1	US	33497620
+2	UK	936722
+3	DE	373956
+4	FR	131386
+5	JP	122441
+
+I just found out where the duplicates come from. 
+
+WITH SUB as (SELECT review_id, customer_id, COUNT(product_id) as Number_of_products
+FROM amazon_reviews_parquet
+GROUP BY review_id, customer_id
+HAVING COUNT(product_id) = 2
+ORDER BY Number_of_products DESC)
+
+SELECT COUNT(*) as "Reviews with two products" FROM SUB
+
+#	Reviews with two products
+1	6931166
+
+Few US Customer wrote a review for two different product in the same review.
+I didn't find any occurences where there were more than 2 products.
+
+Let's zoom in on those duplicates reviews
+
+WITH SUB as
+(SELECT review_id, customer_id, product_id, review_headline, review_body, review_date,
+ROW_NUMBER() OVER(PARTITION BY review_id, customer_id ORDER BY product_id) as row_num,
+COUNT(product_id) OVER(PARTITION BY review_id, customer_id) as number_of_products
+FROM amazon_reviews_parquet)
+
+SELECT * FROM Sub
+WHERE number_of_products = 2
+LIMIT 10
+
+#	review_id	customer_id	product_id	review_headline	review_date	row_num	number_of_products
+3	R10048WDPK0MGJ	16086489	0739368257	Beloved	14464	1	2
+4	R10048WDPK0MGJ	16086489	0739368257	Beloved	14464	2	2
+5	R1007BRKY1CIH4	24894342	B00A6CCF0K	Great	16260	1	2
+6	R1007BRKY1CIH4	24894342	B00A6CCF0K	Great	16260	2	2
+7	R1008K51MAW69	38541975	1590171993	Great story about an ordinary man	14908	1	2
+8	R1008K51MAW69	38541975	1590171993	Great story about an ordinary man	14908	2	2
+1	R10034RYR8UKXE	42324774	B00BFUUMO8	Okay	16163	1	2
+2	R10034RYR8UKXE	42324774	B00BFUUMO8	Okay	16163	2	2
+9	R100907HQUUG4C	32720687	B0054JZC6E	simples games hours of fun	15378	1	2
+10	R100907HQUUG4C	32720687	B0054JZC6E	simples games hours of fun	15378	2	2
+
+
+I thought that the reviews or the products would be different, but it seems like they are the same.
+
+How many of those reviews were made for verified purchases?
+
+SELECT verified_purchase, COUNT(*) as n,  
+COUNT(*)*100 / SUM(COUNT(*)) OVER() as Percentage
+FROM amazon_reviews_parquet
+GROUP BY verified_purchase
+ORDER BY n DESC
+
+#	verified_purchase	n	Percentage
+1	Y	124750163	77
+2	N	36046407	22
+
+Average Star Rating
+
+SELECT marketplace, AVG(star_rating) as average_rating
+FROM amazon_reviews_parquet
+GROUP BY marketplace
+ORDER BY average_rating
+
+#	marketplace	average_rating
+1	US	4.204475145909162
+2	JP	4.213210329572345
+3	DE	4.25173275454595
+4	FR	4.256238192695214
+5	UK	4.379853750584189
+
+On average those reviews are very positive
+
+I wonder what is the distribution of the start rating
+
+SELECT star_rating, COUNT(*) as n, 
+COUNT(*)*100 / SUM(COUNT(*)) OVER() as Percentage
+FROM amazon_reviews_parquet
+GROUP BY star_rating
+ORDER BY star_rating DESC
+
+#	star_rating	n	Percentage
+1	5	99530924	61
+2	4	27996469	17
+3	3	12900929	8
+4	2	7700647	4
+5	1	12667601	7
